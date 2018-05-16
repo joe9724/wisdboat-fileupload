@@ -3,15 +3,18 @@ package main
 import (
 	"net/http"
 	"log"
-	_"github.com/jinzhu/gorm"
+	"github.com/jinzhu/gorm"
 	_ "github.com/jinzhu/gorm/dialects/mysql"
 	"fmt"
-	"io/ioutil"
+	"io"
+	"os"
 	"strconv"
 	"time"
-	"runtime"
 )
 
+type response struct{
+	Url string `json:"url"`
+}
 
 func main() {
 	http.HandleFunc("/upload", Upload)
@@ -20,42 +23,47 @@ func main() {
 		log.Fatal("ListenAndServe: ", err)
 	}
 	fmt.Println("start server at 0.0.0.0:106")
-
 }
 
 func Upload(w http.ResponseWriter, r *http.Request) {
-	file, handler, err := r.FormFile("file") //name的字段
+	w.Header().Set("Access-Control-Allow-Origin", "*")             //允许访问所有域
+	w.Header().Add("Access-Control-Allow-Headers", "Content-Type") //header的类型
+	w.Header().Set("content-type", "application/json")             //返回数据格式是json
+
+	fmt.Println("client:", r.RemoteAddr, "method:", r.Method)
+	fmt.Println("deviceId is",r.URL.Query().Get("deviceId"))
+	r.ParseMultipartForm(32 << 20)
+	file, handler, err := r.FormFile("file")
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
 	defer file.Close()
-	fmt.Println("header is %v", handler.Header)
-	var buff = make([]byte, 1024)
-	n, err := file.Read(buff)
+	//fmt.Fprintf(w, "%v", handler.Header)
+	fmt.Println("%v",handler.Header)
+	filename := strconv.FormatInt((time.Now().Unix()),10)
+	f, err := os.OpenFile("./"+filename+".usf", os.O_WRONLY|os.O_CREATE, 0666)
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
-	//fmt.Println(string(buff[:n]))
+	defer f.Close()
+	io.Copy(f, file)
 
-	fmt.Println("n size is",n)
-	var filename string
-	filename = strconv.FormatInt((time.Now().UnixNano()), 10)
-	if (runtime.GOOS == "windows") {
-		err1 := ioutil.WriteFile(filename+".jpg", file, 0644)
-		if err1 != nil {
-			fmt.Println(err1.Error())
-		}
-	} else {
-		err1 := ioutil.WriteFile("/root/go/src/resource/image/icon/"+filename+".jpg", file, 0644)
-		if err1 != nil {
-			fmt.Println(err1.Error())
-		}
+	var res response
+	res.Url = "http://widsboat-resource.bitekun.xin/"+filename+".usf"
+	io.WriteString(w,res.Url)
+	//
+	db,err := OpenConnection()
+	if err!=nil{
+		fmt.Println(err.Error())
 	}
-	//response.Url = _var.GetResourceDomain("icon") + filename + ".jpg"
-	fmt.Println("response.Url is",filename)
-	//code = 200
-	//msg = "ok"
+	defer db.Close()
+	db.Exec("update devices set uploadfile=? where device_id=?",res.Url,r.URL.Query().Get("deviceId"))
 
+
+}
+func OpenConnection() (db *gorm.DB, err error) {
+	db, err = gorm.Open("mysql", "root:root811123@tcp(106.14.2.153:3306)/wisdboat?charset=utf8&parseTime=True&loc=Local")
+	return db, err
 }
